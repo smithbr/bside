@@ -3,10 +3,10 @@
 Turn a song link into links for the other streaming apps. Supports Spotify, Apple Music, and YouTube Music.
 
 ```
-$ bs "https://music.apple.com/us/album/bimbambau/1895056025?i=6762879197"
+$ bs https://music.apple.com/us/album/bimbambau/1895056025?i=6762879197
 
               via Apple Music
-  ▇           BIMBAMBAU   ✓ copied YouTube Music ♫
+  ▇           BIMBAMBAU
   █ ▆   ▄ ▂   Cain Culto
   █ █ █ █ █   BIMBAMBAU - Single · 2:07
 
@@ -29,6 +29,16 @@ go install github.com/smithbr/bside@latest
 bside [-to spotify|apple|youtube] [-all] [link]
 bside setup
 ```
+
+### Pasting links without quotes
+
+zsh treats the `?` in song links as a wildcard and stops with `no matches found`. Add this to `~/.zshrc` to paste links as-is:
+
+```bash
+alias bs='noglob bs'
+```
+
+Or run `bs` with no link and paste it at the prompt.
 
 ## Spotify credentials
 
