@@ -1,7 +1,11 @@
 package music
 
 import (
+	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -143,5 +147,80 @@ func TestParseYTSearch(t *testing.T) {
 	}
 	if tracks[0] != want {
 		t.Errorf("got %+v, want %+v", tracks[0], want)
+	}
+}
+
+func TestNewSpotifyCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("SPOTIFY_CLIENT_ID", "")
+	t.Setenv("SPOTIFY_CLIENT_SECRET", "")
+
+	if s := NewSpotify(); s.clientID != "" || s.clientSecret != "" {
+		t.Fatalf("no credentials: got %q/%q", s.clientID, s.clientSecret)
+	}
+
+	path, err := configPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"spotify":{"client_id":"file-id","client_secret":"file-secret"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if s := NewSpotify(); s.clientID != "file-id" || s.clientSecret != "file-secret" {
+		t.Fatalf("saved file: got %q/%q", s.clientID, s.clientSecret)
+	}
+
+	t.Setenv("SPOTIFY_CLIENT_ID", "env-id")
+	t.Setenv("SPOTIFY_CLIENT_SECRET", "env-secret")
+	if s := NewSpotify(); s.clientID != "env-id" || s.clientSecret != "env-secret" {
+		t.Fatalf("env override: got %q/%q", s.clientID, s.clientSecret)
+	}
+}
+
+// Earlier versions saved unnested credentials in spotify.json; the first run
+// converts them into bside.json and removes the old file.
+func TestConfigMigrate(t *testing.T) {
+	for _, legacy := range []string{"config", "user config"} {
+		t.Run(legacy, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("XDG_CONFIG_HOME", "")
+			t.Setenv("SPOTIFY_CLIENT_ID", "")
+			t.Setenv("SPOTIFY_CLIENT_SECRET", "")
+
+			path, _ := configPath()
+			if path != filepath.Join(home, ".config", "bside", "bside.json") {
+				t.Fatalf("path = %s, want ~/.config/bside/bside.json", path)
+			}
+			old := filepath.Join(home, ".config", "bside", "spotify.json")
+			if legacy == "user config" {
+				dir, _ := os.UserConfigDir()
+				if old = filepath.Join(dir, "bside", "spotify.json"); filepath.Dir(old) == filepath.Dir(path) {
+					t.Skip("the user config directory is ~/.config on this platform")
+				}
+			}
+			if err := os.MkdirAll(filepath.Dir(old), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(old, []byte(`{"client_id":"old-id","client_secret":"old-secret"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if s := NewSpotify(); s.clientID != "old-id" || s.clientSecret != "old-secret" {
+				t.Fatalf("legacy file: got %q/%q", s.clientID, s.clientSecret)
+			}
+			b, err := os.ReadFile(path)
+			if err != nil || !strings.Contains(string(b), `"spotify"`) {
+				t.Errorf("bside.json not written with a spotify section: %s, %v", b, err)
+			}
+			if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("legacy file still at %s", old)
+			}
+		})
 	}
 }

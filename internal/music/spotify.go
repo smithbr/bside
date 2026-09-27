@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-var ErrSpotifyCredentials = errors.New("set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET to search Spotify")
+var ErrSpotifyCredentials = errors.New("run `bs setup` to search Spotify")
 
 var nextDataRe = regexp.MustCompile(`<script id="__NEXT_DATA__" type="application/json">(.*?)</script>`)
 
@@ -27,11 +27,36 @@ type Spotify struct {
 	expires time.Time
 }
 
+// NewSpotify uses SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET when both are
+// set, otherwise the credentials saved by SetupSpotify.
 func NewSpotify() *Spotify {
-	return &Spotify{
-		clientID:     os.Getenv("SPOTIFY_CLIENT_ID"),
-		clientSecret: os.Getenv("SPOTIFY_CLIENT_SECRET"),
+	c := spotifyCredentials{
+		ClientID:     os.Getenv("SPOTIFY_CLIENT_ID"),
+		ClientSecret: os.Getenv("SPOTIFY_CLIENT_SECRET"),
 	}
+	if c.ClientID == "" || c.ClientSecret == "" {
+		c = loadConfig().Spotify
+	}
+	return &Spotify{clientID: c.ClientID, clientSecret: c.ClientSecret}
+}
+
+// SetupSpotify checks the credentials with Spotify, then saves them in the
+// config file for later runs. It returns the file they were saved to.
+func SetupSpotify(ctx context.Context, clientID, clientSecret string) (string, error) {
+	s := &Spotify{clientID: clientID, clientSecret: clientSecret}
+	if _, err := s.accessToken(ctx); err != nil {
+		return "", err
+	}
+	path, err := configPath()
+	if err != nil {
+		return "", err
+	}
+	c := loadConfig()
+	c.Spotify = spotifyCredentials{clientID, clientSecret}
+	if err := saveConfig(path, c); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func (s *Spotify) ID() string   { return "spotify" }
