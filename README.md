@@ -1,22 +1,20 @@
 # bside
 
-Turn a song link from one streaming platform into links for the others. Supports Spotify, Apple Music, and YouTube Music.
+Turn a song link into links for the other streaming apps. Supports Spotify, Apple Music, and YouTube Music.
 
 ```
-$ bside "https://music.apple.com/us/album/bimbambau/1895056025?i=6762879197"
+$ bs "https://music.apple.com/us/album/bimbambau/1895056025?i=6762879197"
 
-  ╭─────────────────────────────────────────────────────────╮
-  │  ▇           BIMBAMBAU                                  │
-  │  █ ▆   ▄ ▂   Cain Culto                                 │
-  │  █ █ █ █ █   BIMBAMBAU - Single · 2:07 · via Apple Music│
-  ╰─────────────────────────────────────────────────────────╯
+              via Apple Music
+  ▇           BIMBAMBAU   ✓ copied YouTube Music ♫
+  █ ▆   ▄ ▂   Cain Culto
+  █ █ █ █ █   BIMBAMBAU - Single · 2:07
 
-    ▎ Spotify         ⠧ searching…
-    ▎ Apple Music     music.apple.com/us/album/bimbambau/1895056025?i=6762879197  ◆ original
-  › ┃ YouTube Music   music.youtube.com/watch?v=Kf9jrscvBk8  ✓ copied
+    1 ● Spotify          open.spotify.com/track/0LA6vr…
+    2 ● Apple Music      music.apple.com/…/bimbambau
+  ┃   › ● YouTube Music  youtube.com/watch?v=Kf9jrscvBk8
 
-  ↑/k up  ·  ↓/j down  ·  enter copy  ·  o open  ·  q quit
-  copied YouTube Music link   ♫
+  enter copy  ·  x copy & quit  ·  ? more
 ```
 
 ## Install
@@ -28,27 +26,24 @@ go install github.com/smithbr/bside@latest
 ## Usage
 
 ```
-bside [-to spotify|apple|youtube] [-all] <link>
+bside [-to spotify|apple|youtube] [-all] [link]
+bside setup
 ```
-
-- No flags in a terminal: a live list of every platform's link, filling in as each search finishes. `enter` copies the selected link, `o` opens it, `q` quits (the list stays in your scrollback).
-- `-to <platform>`: print only that link (good for scripts, e.g. `bside -to spotify "$url" | pbcopy`).
-- `-all`, or when output is piped: print every link found as plain text.
 
 ## Spotify credentials
 
-Reading Spotify links works without credentials. Searching Spotify requires a free app from the [Spotify developer dashboard](https://developer.spotify.com/dashboard), exposed as `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET`. With 1Password:
+Searching Spotify needs an app from the [Spotify developer dashboard](https://developer.spotify.com/dashboard), and Spotify only lets an app use the Web API when the account that owns it has Premium. Run this once:
 
 ```bash
-op run --env-file=.env -- bside "$url"
+bside setup
 ```
 
-where `.env` holds `op://` references rather than secrets.
+It opens the dashboard, tells you what to put in each field, checks the Client ID and secret you paste back, and saves them in bside's config file, `~/.config/bside/bside.json` (or under `$XDG_CONFIG_HOME` if you set it), readable only by you.
 
-## How it works
+`SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` take precedence over the saved file.
 
-Each platform in `internal/music` implements `Lookup` (read a link into title/artist/duration/ISRC) and `Search` (find the best match in its catalog). Matches are scored by ISRC when both sides have one, otherwise by normalized title and artist similarity with a duration check.
-
-- **Apple Music**: public iTunes Search/Lookup API. New releases missing from the search index are found via the artist's song list.
-- **Spotify**: Web API (client credentials); falls back to the public embed page for lookups.
-- **YouTube Music**: the unofficial innertube API used by music.youtube.com. If it breaks, bump `ytClientVersion` in `internal/music/ytmusic.go` first.
+```bash
+export SPOTIFY_CLIENT_ID=your-client-id
+export SPOTIFY_CLIENT_SECRET=your-client-secret
+bs "$url"
+```
