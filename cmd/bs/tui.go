@@ -32,7 +32,7 @@ type palette struct {
 
 	brand     map[string]color.Color
 	eq        []color.Color
-	toastFade []color.Color // the header's toast fades from bright to nothing
+	toastFade []color.Color // a row's toast fades from bright to nothing
 }
 
 func newPalette(dark bool) palette {
@@ -162,14 +162,15 @@ type model struct {
 	startFrame int // frame the lookup finished; reveals count from here
 	lastReveal int
 
-	pal     palette
-	frame   int
-	width   int
-	height  int
-	originY int // screen row where the view starts, or -1 if unknown
-	help    help.Model
-	toast   string
-	toastAt int
+	pal      palette
+	frame    int
+	width    int
+	height   int
+	originY  int // screen row where the view starts, or -1 if unknown
+	help     help.Model
+	toast    string
+	toastAt  int
+	toastRow int // the row the toast is about; it shows at that row's end
 
 	ticket   bool // quit via copy & quit, so leave the ticket behind
 	answered bool // the terminal has replied to the startup queries
@@ -361,9 +362,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err := openURL(r.url); err != nil {
 					m.toast = "✕ couldn't open: " + err.Error()
 				} else {
-					m.toast = "↗ opening " + r.provider.Name()
+					m.toast = "↗ opening"
 				}
-				m.toastAt = m.frame
+				m.toastAt, m.toastRow = m.frame, m.cursor
 			}
 		case key.Matches(msg, keys.Help):
 			m.help.ShowAll = !m.help.ShowAll
@@ -473,10 +474,10 @@ func (m *model) copy() bool {
 		return false
 	}
 	if err := writeClipboard(r.url); err != nil {
-		m.toast, m.toastAt = "✕ couldn't copy: "+err.Error(), m.frame
+		m.toast, m.toastAt, m.toastRow = "✕ couldn't copy: "+err.Error(), m.frame, m.cursor
 		return false
 	}
-	m.toast, m.toastAt, m.copied = "✓ copied "+r.provider.Name(), m.frame, m.cursor
+	m.toast, m.toastAt, m.toastRow, m.copied = "✓ copied", m.frame, m.cursor, m.cursor
 	return true
 }
 
@@ -638,14 +639,14 @@ func (m model) box(lines []string, w int, from, to color.Color, dividers map[int
 	return strings.Join(out, "\n")
 }
 
-// header is the equalizer beside the song: title and toast, artist, details.
+// header is the equalizer beside the song: title, artist, details.
 func (m model) header(w int) string {
 	p := m.pal
 	textW := w - eqWidth - 3
 	var via, title, artist, meta string
 	switch {
 	case m.loaded:
-		title = m.titleLine(textW)
+		title = p.gradient(truncate(m.track.Title, textW))
 		artist = lipgloss.NewStyle().Foreground(p.amber).Render(truncate(m.track.Artist, textW))
 		via = lipgloss.NewStyle().Foreground(p.muted).Render("via ") +
 			lipgloss.NewStyle().Foreground(p.brand[m.source.ID()]).Render(m.source.Name())
@@ -678,33 +679,22 @@ func (m model) header(w int) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, m.equalizer(), "   ", text)
 }
 
-// titleLine is the song title in a warm gradient, with the toast, if any,
-// beside it.
-func (m model) titleLine(width int) string {
-	p := m.pal
-	var toast string
-	if age := m.frame - m.toastAt; age < toastFrames && m.toast != "" {
-		step := min(age*len(p.toastFade)/toastFrames, len(p.toastFade)-1)
-		toast = lipgloss.NewStyle().Foreground(p.toastFade[step]).
-			Render(truncate(m.toast, width/2) + " " + notes[(age/2)%len(notes)])
-	}
-	gap := 0
-	if toast != "" {
-		gap = 3
-	}
-	title := p.gradient(truncate(m.track.Title, width-lipgloss.Width(toast)-gap))
-	if toast == "" {
-		return title
-	}
-	return title + "   " + toast
-}
-
 // row is one platform: number or pointer, the platform in its color, the link.
 func (m model) row(i int, r tuiRow, w int) string {
 	p := m.pal
 	c := p.brand[r.provider.ID()]
 	active := i == m.cursor
-	lw := min(linkWidth, max(12, w-2-2-nameWidth-maxNudge-12))
+	room := w - 2 - 2 - nameWidth - maxNudge // what's left for the link and toast
+	lw := min(linkWidth, max(12, room-12))
+
+	// A toast about this row trails its link, which gives up space if needed.
+	var toast string
+	if age := m.frame - m.toastAt; i == m.toastRow && age < toastFrames && m.toast != "" {
+		step := min(age*len(p.toastFade)/toastFrames, len(p.toastFade)-1)
+		text := m.toast + " " + notes[(age/2)%len(notes)]
+		lw = max(8, min(lw, room-2-lipgloss.Width(text)))
+		toast = "  " + lipgloss.NewStyle().Foreground(p.toastFade[step]).Render(truncate(text, room-lw-2))
+	}
 
 	pointer := "  "
 	if r.url != "" {
@@ -751,8 +741,11 @@ func (m model) row(i int, r tuiRow, w int) string {
 		}
 		// The label is a terminal hyperlink to the full URL.
 		detail = lipgloss.NewStyle().Hyperlink(r.url).Render(text)
+		if toast != "" {
+			detail += strings.Repeat(" ", max(0, lw-lipgloss.Width(label)))
+		}
 	}
-	return lean + pointer + dot + name.Render(r.provider.Name()) + detail
+	return lean + pointer + dot + name.Render(r.provider.Name()) + detail + toast
 }
 
 // lean is how far the selected row leans in right now: the spring's position,
