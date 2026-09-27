@@ -1,7 +1,10 @@
 package music
 
 import (
+	"bytes"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -257,5 +260,16 @@ func TestConfigMigrate(t *testing.T) {
 				t.Errorf("legacy file still at %s", old)
 			}
 		})
+	}
+}
+
+func TestFetchRejectsOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(bytes.Repeat([]byte("x"), maxBody+1))
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	if _, err := fetch(req); err == nil {
+		t.Fatal("fetch accepted a body over maxBody")
 	}
 }
