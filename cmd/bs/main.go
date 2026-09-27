@@ -58,6 +58,9 @@ func run(ctx context.Context, args []string) error {
 	var positional []string
 	for {
 		if err := fs.Parse(args); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
 			return err
 		}
 		if fs.NArg() == 0 {
