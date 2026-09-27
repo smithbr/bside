@@ -527,14 +527,21 @@ func (m model) listTop() int {
 	return 1 + eqHeight + 1
 }
 
-func openURL(u string) error {
+// openURL opens a platform's link in the browser. Links can come from API
+// responses, so only https ones are handed to the OS, which would otherwise
+// launch local files or other schemes.
+func openURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("not an https link: %q", raw)
+	}
 	switch runtime.GOOS {
 	case "darwin":
-		return exec.Command("open", u).Start()
+		return exec.Command("open", u.String()).Start()
 	case "windows":
-		return exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start()
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", u.String()).Start()
 	default:
-		return exec.Command("xdg-open", u).Start()
+		return exec.Command("xdg-open", u.String()).Start()
 	}
 }
 

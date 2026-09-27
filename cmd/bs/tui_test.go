@@ -144,3 +144,17 @@ func TestPasteReplacesLink(t *testing.T) {
 		t.Fatal("junk paste started a lookup")
 	}
 }
+
+func TestOpenURLRejectsNonHTTPS(t *testing.T) {
+	for _, u := range []string{
+		"http://music.apple.com/us/song/x/1",
+		"file:///Applications/Calculator.app",
+		"-a Calculator",
+		"https:///no-host",
+		"javascript:alert(1)",
+	} {
+		if err := openURL(u); err == nil {
+			t.Errorf("openURL(%q) = nil, want an error", u)
+		}
+	}
+}
