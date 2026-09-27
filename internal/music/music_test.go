@@ -78,8 +78,30 @@ func TestTrackIDs(t *testing.T) {
 }
 
 func TestCleanAppleURL(t *testing.T) {
-	got := cleanAppleURL("https://music.apple.com/us/album/x/1?i=2&uo=4")
-	if want := "https://music.apple.com/us/album/x/1?i=2"; got != want {
+	for in, want := range map[string]string{
+		"https://music.apple.com/us/album/x/1?i=2&uo=4":      "https://music.apple.com/us/album/x/1?i=2",
+		"https://music.apple.com/us/song/x/1\x1b]52;c;x\x07": "",
+	} {
+		if got := cleanAppleURL(in); got != want {
+			t.Errorf("cleanAppleURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAppleTracksSkipsBadURLs(t *testing.T) {
+	tracks := appleTracks([]itunesResult{
+		{WrapperType: "track", TrackName: "Bad", TrackViewURL: "https://music.apple.com/us/song/x/1\x1b[2J"},
+		{WrapperType: "artist", ArtistName: "Someone"},
+		{WrapperType: "track", TrackName: "Good", TrackViewURL: "https://music.apple.com/us/song/x/2"},
+	})
+	if len(tracks) != 1 || tracks[0].Title != "Good" {
+		t.Errorf("appleTracks = %+v, want only Good", tracks)
+	}
+}
+
+func TestSpotifyTrackURLEscapesID(t *testing.T) {
+	got := spotifyTrack{ID: "abc\x1b[2J/../x"}.track().URL
+	if want := "https://open.spotify.com/track/abc%1B%5B2J%2F..%2Fx"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
@@ -119,6 +141,19 @@ func TestNormalize(t *testing.T) {
 	for in, want := range tests {
 		if got := normalize(in); got != want {
 			t.Errorf("normalize(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCleanText(t *testing.T) {
+	for in, want := range map[string]string{
+		"Never Gonna Give You Up":           "Never Gonna Give You Up",
+		"Beyoncé — Halo ♫":                  "Beyoncé — Halo ♫",
+		"Song\x1b]52;c;ZXZpbA==\x07\x1b[2J": "Song]52;c;ZXZpbA==[2J",
+		"Line\nbreak\ttab\r\u009b31m":       "Linebreaktab31m",
+	} {
+		if got := cleanText(in); got != want {
+			t.Errorf("cleanText(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

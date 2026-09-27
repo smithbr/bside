@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"time"
+	"unicode"
 )
 
 var (
@@ -32,4 +34,15 @@ type Provider interface {
 
 func Providers() []Provider {
 	return []Provider{NewSpotify(), NewApple(), NewYouTubeMusic()}
+}
+
+// cleanText drops control characters so a title or artist name someone else
+// wrote can't smuggle terminal escape sequences onto the screen.
+func cleanText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }

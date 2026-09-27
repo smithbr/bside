@@ -89,8 +89,8 @@ func (y *YouTubeMusic) Lookup(ctx context.Context, u *url.URL) (Track, error) {
 		return Track{}, ErrNotFound
 	}
 	secs, _ := strconv.Atoi(d.LengthSeconds)
-	artist := strings.TrimSuffix(strings.TrimSuffix(d.Author, " - Topic"), "VEVO")
-	title := strings.TrimPrefix(d.Title, artist+" - ")
+	artist := cleanText(strings.TrimSuffix(strings.TrimSuffix(d.Author, " - Topic"), "VEVO"))
+	title := strings.TrimPrefix(cleanText(d.Title), artist+" - ")
 	return Track{
 		Title:    title,
 		Artist:   artist,
@@ -174,14 +174,14 @@ func parseYTSearch(raw json.RawMessage) ([]Track, error) {
 		}
 		t := Track{URL: ytWatchURL(li.PlaylistItemData.VideoID)}
 		if runs := li.FlexColumns[0].Renderer.Text.Runs; len(runs) > 0 {
-			t.Title = runs[0].Text
+			t.Title = cleanText(runs[0].Text)
 		}
 		for _, r := range li.FlexColumns[1].Renderer.Text.Runs {
 			switch {
 			case r.NavigationEndpoint.BrowseEndpoint.Configs.Music.PageType == "MUSIC_PAGE_TYPE_ARTIST" && t.Artist == "":
-				t.Artist = r.Text
+				t.Artist = cleanText(r.Text)
 			case r.NavigationEndpoint.BrowseEndpoint.Configs.Music.PageType == "MUSIC_PAGE_TYPE_ALBUM":
-				t.Album = r.Text
+				t.Album = cleanText(r.Text)
 			case ytDurationRe.MatchString(r.Text):
 				t.Duration = parseClock(r.Text)
 			}

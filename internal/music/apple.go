@@ -58,19 +58,20 @@ type itunesResult struct {
 
 func (r itunesResult) track() Track {
 	return Track{
-		Title:    r.TrackName,
-		Artist:   r.ArtistName,
-		Album:    r.CollectionName,
+		Title:    cleanText(r.TrackName),
+		Artist:   cleanText(r.ArtistName),
+		Album:    cleanText(r.CollectionName),
 		Duration: time.Duration(r.TrackTimeMillis) * time.Millisecond,
 		URL:      cleanAppleURL(r.TrackViewURL),
 	}
 }
 
-// cleanAppleURL drops the iTunes affiliate/tracking params, keeping ?i=.
+// cleanAppleURL drops the iTunes affiliate/tracking params, keeping ?i=. It
+// returns "" for a link that doesn't parse, such as one with control characters.
 func cleanAppleURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return raw
+		return ""
 	}
 	q := url.Values{}
 	if i := u.Query().Get("i"); i != "" {
@@ -103,10 +104,8 @@ func (a *Apple) Lookup(ctx context.Context, u *url.URL) (Track, error) {
 	if err != nil {
 		return Track{}, err
 	}
-	for _, r := range results {
-		if r.WrapperType == "track" {
-			return r.track(), nil
-		}
+	if tracks := appleTracks(results); len(tracks) > 0 {
+		return tracks[0], nil
 	}
 	return Track{}, ErrNotFound
 }
@@ -155,8 +154,11 @@ func (a *Apple) searchByArtist(ctx context.Context, want Track) (Track, error) {
 func appleTracks(results []itunesResult) []Track {
 	var tracks []Track
 	for _, r := range results {
-		if r.WrapperType == "track" {
-			tracks = append(tracks, r.track())
+		if r.WrapperType != "track" {
+			continue
+		}
+		if t := r.track(); t.URL != "" {
+			tracks = append(tracks, t)
 		}
 	}
 	return tracks

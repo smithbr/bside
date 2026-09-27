@@ -130,12 +130,12 @@ func (s *Spotify) lookupEmbed(ctx context.Context, id string) (Track, error) {
 		return Track{}, ErrNotFound
 	}
 	t := Track{
-		Title:    e.Name,
+		Title:    cleanText(e.Name),
 		Duration: time.Duration(e.Duration) * time.Millisecond,
-		URL:      "https://open.spotify.com/track/" + id,
+		URL:      "https://open.spotify.com/track/" + url.PathEscape(id),
 	}
 	if len(e.Artists) > 0 {
-		t.Artist = e.Artists[0].Name
+		t.Artist = cleanText(e.Artists[0].Name)
 	}
 	return t, nil
 }
@@ -186,14 +186,14 @@ type spotifyTrack struct {
 
 func (st spotifyTrack) track() Track {
 	t := Track{
-		Title:    st.Name,
-		Album:    st.Album.Name,
+		Title:    cleanText(st.Name),
+		Album:    cleanText(st.Album.Name),
 		Duration: time.Duration(st.DurationMS) * time.Millisecond,
 		ISRC:     st.ExternalIDs.ISRC,
-		URL:      "https://open.spotify.com/track/" + st.ID,
+		URL:      "https://open.spotify.com/track/" + url.PathEscape(st.ID),
 	}
 	if len(st.Artists) > 0 {
-		t.Artist = st.Artists[0].Name
+		t.Artist = cleanText(st.Artists[0].Name)
 	}
 	return t
 }
