@@ -63,7 +63,7 @@ const (
 	eqWidth     = eqBars*2 - 1
 	toastFrames = 24
 	nameWidth   = 15
-	linkWidth   = 32
+	linkWidth   = 64
 	maxNudge    = 2 // how far the selected row leans in, in columns
 
 	// Results are held back so they arrive in a steady rhythm: nothing shows
@@ -585,7 +585,7 @@ func (m model) content() string {
 
 // panelWidth is the most room the UI's text gets, inside the page padding.
 func (m model) panelWidth() int {
-	return min(76, max(44, m.width-4))
+	return min(152, max(44, m.width-4))
 }
 
 // panel is the whole UI, unboxed: the now-playing header, then a row per
@@ -730,7 +730,7 @@ func (m model) row(i int, r tuiRow, w int) string {
 		}
 		detail = lipgloss.NewStyle().Foreground(p.faint).Render(msg)
 	default:
-		label := truncate(shortLink(r.url), lw)
+		label := truncate(shortLink(r.url, lw), lw)
 		style := lipgloss.NewStyle().Foreground(p.muted)
 		if active {
 			style = style.Foreground(p.ink)
@@ -760,7 +760,7 @@ func (m model) ticketView() string {
 	p := m.pal
 	r := m.rows[max(m.copied, 0)]
 	to := p.brand[r.provider.ID()]
-	w := min(m.panelWidth()-6, max(36, lipgloss.Width(shortLink(r.url))+12))
+	w := min(m.panelWidth()-6, max(36, lipgloss.Width(shortLink(r.url, linkWidth))+12))
 
 	title := lipgloss.NewStyle().Foreground(p.amber).Render("♫  ") + p.gradient(truncate(m.track.Title, w-3))
 	sub := "   " + lipgloss.NewStyle().Foreground(p.amber).Render(truncate(m.track.Artist, w-3))
@@ -770,7 +770,7 @@ func (m model) ticketView() string {
 	route := lipgloss.NewStyle().Foreground(p.brand[m.source.ID()]).Render(m.source.Name()) +
 		lipgloss.NewStyle().Foreground(p.muted).Render("  ──▶  ") +
 		lipgloss.NewStyle().Foreground(to).Bold(true).Render(r.provider.Name())
-	link := lipgloss.NewStyle().Foreground(p.ink).Hyperlink(r.url).Render(truncate(shortLink(r.url), w-11)) +
+	link := lipgloss.NewStyle().Foreground(p.ink).Hyperlink(r.url).Render(truncate(shortLink(r.url, w-11), w-11)) +
 		lipgloss.NewStyle().Foreground(to).Render("  ✓ copied")
 
 	lines := []string{title, sub, "", route, link}
@@ -787,7 +787,7 @@ func (m model) receipt() string {
 			lipgloss.NewStyle().Foreground(p.amber).Render(m.track.Artist),
 	}
 	link := func(r tuiRow) string {
-		return lipgloss.NewStyle().Foreground(p.muted).Hyperlink(r.url).Render(shortLink(r.url))
+		return lipgloss.NewStyle().Foreground(p.muted).Hyperlink(r.url).Render(shortLink(r.url, linkWidth))
 	}
 	if m.copied >= 0 {
 		r := m.rows[m.copied]
@@ -914,14 +914,17 @@ func duration(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-// shortLink trims a canonical song URL to something that fits in a column
-// while keeping the part a person recognizes.
-func shortLink(raw string) string {
+// shortLink is a song URL without its scheme, or, when that's longer than
+// width, trimmed to the part a person recognizes.
+func shortLink(raw string, width int) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return strings.TrimPrefix(raw, "https://")
 	}
 	host := strings.TrimPrefix(u.Hostname(), "www.")
+	if full := strings.TrimSuffix(host+u.RequestURI(), "/"); len([]rune(full)) <= width {
+		return full
+	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	switch {
 	case host == "open.spotify.com" && len(parts) == 2:

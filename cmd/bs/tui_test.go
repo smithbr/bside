@@ -14,18 +14,33 @@ import (
 
 func TestShortLink(t *testing.T) {
 	tests := []struct{ in, want string }{
+		{"https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", "open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"},
+		{"https://music.apple.com/us/album/bimbambau/1895056025?i=6762879197", "music.apple.com/us/album/bimbambau/1895056025?i=6762879197"},
+		{"https://music.youtube.com/watch?v=Kf9jrscvBk8", "music.youtube.com/watch?v=Kf9jrscvBk8"},
+		{"https://www.example.com/a/b/song", "example.com/a/b/song"},
+		{"https://example.com/", "example.com"},
+		// Too long for the column, so trimmed to what a person recognizes.
+		{"https://music.apple.com/us/album/a-very-long-song-title-that-goes-on/1895056025?i=6762879197", "music.apple.com/…/a-very-long-song-title-that-goes-on"},
+		{"https://www.example.com/" + strings.Repeat("x", 30) + "/" + strings.Repeat("y", 40) + "/song", "example.com/…/song"},
+	}
+	for _, tt := range tests {
+		if got := shortLink(tt.in, linkWidth); got != tt.want {
+			t.Errorf("shortLink(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+		if n := len([]rune(shortLink(tt.in, linkWidth))); n > linkWidth {
+			t.Errorf("shortLink(%q) is %d chars, over the %d-char column", tt.in, n, linkWidth)
+		}
+	}
+
+	// In a narrow column, links fall back to the parts a person recognizes.
+	narrow := []struct{ in, want string }{
 		{"https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", "open.spotify.com/track/4uLU6h…"},
 		{"https://music.apple.com/us/album/bimbambau/1895056025?i=6762879197", "music.apple.com/…/bimbambau"},
 		{"https://music.youtube.com/watch?v=Kf9jrscvBk8", "youtube.com/watch?v=Kf9jrscvBk8"},
-		{"https://www.example.com/a/b/song", "example.com/…/song"},
-		{"https://example.com/", "example.com"},
 	}
-	for _, tt := range tests {
-		if got := shortLink(tt.in); got != tt.want {
-			t.Errorf("shortLink(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-		if n := len([]rune(shortLink(tt.in))); n > linkWidth {
-			t.Errorf("shortLink(%q) is %d chars, over the %d-char column", tt.in, n, linkWidth)
+	for _, tt := range narrow {
+		if got := shortLink(tt.in, 32); got != tt.want {
+			t.Errorf("shortLink(%q, 32) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
