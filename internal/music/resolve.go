@@ -16,7 +16,10 @@ type Result struct {
 
 // Source finds the provider that owns the link.
 func Source(providers []Provider, link string) (Provider, *url.URL, error) {
-	u, err := url.Parse(strings.TrimSpace(link))
+	// Shells escape ? and = when a link is pasted (zsh's url-quote-magic),
+	// and inside quotes the backslashes survive. They're never valid in a
+	// URL, so drop them.
+	u, err := url.Parse(strings.ReplaceAll(strings.TrimSpace(link), `\`, ""))
 	if err != nil || u.Host == "" {
 		return nil, nil, fmt.Errorf("not a valid link: %q", link)
 	}

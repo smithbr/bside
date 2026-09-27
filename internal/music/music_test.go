@@ -35,6 +35,11 @@ func TestSource(t *testing.T) {
 			t.Errorf("Source(%q) = %s, want %s", link, p.ID(), want)
 		}
 	}
+	// A link pasted into zsh inside quotes arrives with ? and = escaped.
+	p, u, err := Source(providers, `https://music.youtube.com/watch\?v\=Kf9jrscvBk8`)
+	if err != nil || p.ID() != "youtube" || u.Query().Get("v") != "Kf9jrscvBk8" {
+		t.Errorf("shell-escaped link: got %v, %v, %v", p, u, err)
+	}
 	for _, link := range []string{"https://tidal.com/track/1", "not a link"} {
 		if _, _, err := Source(providers, link); err == nil {
 			t.Errorf("Source(%q) succeeded, want error", link)
