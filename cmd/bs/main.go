@@ -10,23 +10,26 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
 	"github.com/smithbr/bside/internal/music"
 )
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `Usage: bside [flags] <link>
+	fmt.Fprintf(os.Stderr, `Usage: bs [flags] [link]
+       bs setup
 
 Turns a song link from one streaming platform into links for the others.
-Supported: Spotify, Apple Music, YouTube Music.
+Supported: Spotify, Apple Music, YouTube Music. With no link, bs asks you
+to paste one.
 
 Flags:
   -to <platform>  print only this platform's link (spotify, apple, youtube)
   -all            print every link found without the interactive list
 
-Searching Spotify needs SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.
+Searching Spotify needs a Spotify developer app (Premium only): run "bs setup" once,
+or set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.
 `)
 }
 
@@ -43,7 +46,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("bside", flag.ContinueOnError)
+	if len(args) == 1 && args[0] == "setup" {
+		return runSetup(ctx)
+	}
+	fs := flag.NewFlagSet("bs", flag.ContinueOnError)
 	fs.Usage = usage
 	to := fs.String("to", "", "")
 	all := fs.Bool("all", false, "")
@@ -60,7 +66,7 @@ func run(ctx context.Context, args []string) error {
 		positional = append(positional, fs.Arg(0))
 		args = fs.Args()[1:]
 	}
-	if len(positional) != 1 {
+	if len(positional) > 1 {
 		usage()
 		os.Exit(2)
 	}
@@ -70,12 +76,21 @@ func run(ctx context.Context, args []string) error {
 	if *to != "" && !knownProvider(providers, *to) {
 		return fmt.Errorf("unknown platform %q (want spotify, apple, or youtube)", *to)
 	}
+	interactive := *to == "" && !*all && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+
+	if len(positional) == 0 {
+		if interactive {
+			return runTUI(ctx, providers, nil, nil)
+		}
+		usage()
+		os.Exit(2)
+	}
+
 	source, u, err := music.Source(providers, positional[0])
 	if err != nil {
 		return err
 	}
-
-	if *to == "" && !*all && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd())) {
+	if interactive {
 		return runTUI(ctx, providers, source, u)
 	}
 
