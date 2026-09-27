@@ -20,10 +20,10 @@ type spotifyCredentials struct {
 
 // configDir is $XDG_CONFIG_HOME/bside, or ~/.config/bside like most
 // command-line tools, including on macOS. Windows keeps its own config
-// directory.
+// directory. As the XDG spec asks, a relative XDG_CONFIG_HOME is ignored.
 func configDir() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
-	if dir == "" {
+	if !filepath.IsAbs(dir) {
 		var err error
 		if runtime.GOOS == "windows" {
 			dir, err = os.UserConfigDir()

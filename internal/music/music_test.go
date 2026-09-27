@@ -221,6 +221,24 @@ func TestNewSpotifyCredentials(t *testing.T) {
 	}
 }
 
+func TestConfigDirXDG(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows keeps its own config directory")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, tc := range []struct{ xdg, want string }{
+		{"", filepath.Join(home, ".config", "bside")},
+		{"relative/cfg", filepath.Join(home, ".config", "bside")},
+		{filepath.Join(home, "cfg"), filepath.Join(home, "cfg", "bside")},
+	} {
+		t.Setenv("XDG_CONFIG_HOME", tc.xdg)
+		if dir, err := configDir(); err != nil || dir != tc.want {
+			t.Errorf("XDG_CONFIG_HOME=%q: got %q, %v; want %q", tc.xdg, dir, err, tc.want)
+		}
+	}
+}
+
 // Earlier versions saved unnested credentials in spotify.json; the first run
 // converts them into bside.json and removes the old file.
 func TestConfigMigrate(t *testing.T) {
