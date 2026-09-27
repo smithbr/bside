@@ -77,8 +77,24 @@ func loadConfig() config {
 	}
 	if err == nil {
 		json.Unmarshal(b, &c)
+		restrictPerms(path)
 	}
 	return c
+}
+
+// restrictPerms makes a config file someone created or copied by hand, and
+// its directory, private again, since the file holds the Spotify secret.
+// Windows doesn't use these permission bits.
+func restrictPerms(path string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
+		os.Chmod(path, 0o600)
+	}
+	if fi, err := os.Stat(filepath.Dir(path)); err == nil && fi.Mode().Perm()&0o077 != 0 {
+		os.Chmod(filepath.Dir(path), 0o700)
+	}
 }
 
 // migrateConfig converts the first legacy spotify.json it finds into

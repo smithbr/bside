@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,34 @@ func TestConfigMigrate(t *testing.T) {
 				t.Errorf("legacy file still at %s", old)
 			}
 		})
+	}
+}
+
+func TestLoadConfigTightensPerms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no permission bits on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	dir := filepath.Join(home, ".config", "bside")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(dir, 0o755)
+	path := filepath.Join(dir, "bside.json")
+	if err := os.WriteFile(path, []byte(`{"spotify":{"client_id":"id","client_secret":"secret"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(path, 0o644)
+
+	if c := loadConfig(); c.Spotify.ClientSecret != "secret" {
+		t.Fatalf("loadConfig = %+v", c)
+	}
+	for p, want := range map[string]os.FileMode{path: 0o600, dir: 0o700} {
+		if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != want {
+			t.Errorf("%s mode = %v, want %v", p, fi.Mode().Perm(), want)
+		}
 	}
 }
 
