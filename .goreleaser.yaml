@@ -1,0 +1,68 @@
+# Builds release binaries when a v* tag is pushed; see .github/workflows/release.yml.
+# Try it locally with: make snapshot
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/bs
+    binary: bs
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Other
+      order: 999
+
+# Publishes a cask to github.com/smithbr/homebrew-tap, so people can
+# brew install smithbr/tap/bs. Skipped until the HOMEBREW_TAP_GITHUB_TOKEN
+# secret exists, since the default token can't push to another repo.
+homebrew_casks:
+  - name: bs
+    binaries: [bs]
+    homepage: https://github.com/smithbr/bside
+    description: Turn a song link into links for the other streaming apps
+    license: MIT
+    repository:
+      owner: smithbr
+      name: homebrew-tap
+      token: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}'
+    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "") "" }}true{{ end }}'
+    hooks:
+      post:
+        # The binaries aren't notarized, so clear Gatekeeper's quarantine flag.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/bs"]
+          end

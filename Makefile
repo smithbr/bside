@@ -23,3 +23,9 @@ lint:
 	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
 	go vet ./...
 	golangci-lint run ./...
+
+# Builds every release binary into dist/ without publishing anything.
+# Needs GoReleaser (brew install goreleaser).
+.PHONY: snapshot
+snapshot:
+	goreleaser release --snapshot --clean
