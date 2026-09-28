@@ -653,6 +653,9 @@ func (m model) header(w int) string {
 		// Album · 2:07, where only the album gets shortened.
 		var parts []string
 		d := duration(m.track.Duration)
+		if m.track.Kind == music.Album {
+			d = albumDetails(m.track)
+		}
 		if m.track.Album != "" && m.track.Album != m.track.Title {
 			if room := textW - lipgloss.Width(d) - 3; room >= 4 {
 				parts = append(parts, truncate(m.track.Album, room))
@@ -764,7 +767,11 @@ func (m model) ticketView() string {
 
 	title := lipgloss.NewStyle().Foreground(p.amber).Render("♫  ") + p.gradient(truncate(m.track.Title, w-3))
 	sub := "   " + lipgloss.NewStyle().Foreground(p.amber).Render(truncate(m.track.Artist, w-3))
-	if d := duration(m.track.Duration); d != "" {
+	d := duration(m.track.Duration)
+	if m.track.Kind == music.Album {
+		d = albumDetails(m.track)
+	}
+	if d != "" {
 		sub += lipgloss.NewStyle().Foreground(p.muted).Render(" · " + d)
 	}
 	route := lipgloss.NewStyle().Foreground(p.brand[m.source.ID()]).Render(m.source.Name()) +
@@ -914,7 +921,18 @@ func duration(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-// shortLink is a song URL without its scheme, or, when that's longer than
+// albumDetails stands in for a song's length: "Album · 11 songs".
+func albumDetails(t music.Track) string {
+	switch t.TrackCount {
+	case 0:
+		return "Album"
+	case 1:
+		return "Album · 1 song"
+	}
+	return fmt.Sprintf("Album · %d songs", t.TrackCount)
+}
+
+// shortLink is a song or album URL without its scheme, or, when that's longer than
 // width, trimmed to the part a person recognizes.
 func shortLink(raw string, width int) string {
 	u, err := url.Parse(raw)

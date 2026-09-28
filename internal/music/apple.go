@@ -28,32 +28,47 @@ func (a *Apple) Owns(u *url.URL) bool {
 	return false
 }
 
-// appleTrackID handles album links with ?i=<track> and /song/<slug>/<id> links.
-func appleTrackID(u *url.URL) (id, country string, err error) {
+// appleID handles album links, with ?i=<track> for one of their songs, and
+// /song/<slug>/<id> links.
+func appleID(u *url.URL) (id, country string, kind Kind, err error) {
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	country = "us"
 	if len(parts) > 0 && len(parts[0]) == 2 {
 		country = parts[0]
 	}
 	if i := u.Query().Get("i"); i != "" {
-		return i, country, nil
+		return i, country, Song, nil
 	}
 	for i, p := range parts {
-		if p == "song" && i+1 < len(parts) {
-			return parts[len(parts)-1], country, nil
+		if (p == "song" || p == "album") && i+1 < len(parts) {
+			kind = Song
+			if p == "album" {
+				kind = Album
+			}
+			return parts[len(parts)-1], country, kind, nil
 		}
 	}
-	return "", "", ErrUnsupported
+	return "", "", Song, ErrUnsupported
+}
+
+// itunesEntity is the lookup and search entity for a kind.
+func itunesEntity(k Kind) string {
+	if k == Album {
+		return "album"
+	}
+	return "song"
 }
 
 type itunesResult struct {
-	WrapperType     string `json:"wrapperType"`
-	ArtistID        int    `json:"artistId"`
-	TrackName       string `json:"trackName"`
-	ArtistName      string `json:"artistName"`
-	CollectionName  string `json:"collectionName"`
-	TrackTimeMillis int    `json:"trackTimeMillis"`
-	TrackViewURL    string `json:"trackViewUrl"`
+	WrapperType       string `json:"wrapperType"`
+	ArtistID          int    `json:"artistId"`
+	TrackName         string `json:"trackName"`
+	ArtistName        string `json:"artistName"`
+	CollectionName    string `json:"collectionName"`
+	CollectionViewURL string `json:"collectionViewUrl"`
+	TrackCount        int    `json:"trackCount"`
+	TrackTimeMillis   int    `json:"trackTimeMillis"`
+	TrackViewURL      string `json:"trackViewUrl"`
 }
 
 func (r itunesResult) track() Track {
@@ -63,6 +78,16 @@ func (r itunesResult) track() Track {
 		Album:    cleanText(r.CollectionName),
 		Duration: time.Duration(r.TrackTimeMillis) * time.Millisecond,
 		URL:      cleanAppleURL(r.TrackViewURL),
+	}
+}
+
+func (r itunesResult) album() Track {
+	return Track{
+		Kind:       Album,
+		Title:      cleanText(r.CollectionName),
+		Artist:     cleanText(r.ArtistName),
+		TrackCount: r.TrackCount,
+		URL:        cleanAppleURL(r.CollectionViewURL),
 	}
 }
 
@@ -96,15 +121,15 @@ func (a *Apple) itunes(ctx context.Context, endpoint string, params url.Values) 
 }
 
 func (a *Apple) Lookup(ctx context.Context, u *url.URL) (Track, error) {
-	id, country, err := appleTrackID(u)
+	id, country, kind, err := appleID(u)
 	if err != nil {
 		return Track{}, err
 	}
-	results, err := a.itunes(ctx, "lookup", url.Values{"id": {id}, "country": {country}, "entity": {"song"}})
+	results, err := a.itunes(ctx, "lookup", url.Values{"id": {id}, "country": {country}, "entity": {itunesEntity(kind)}})
 	if err != nil {
 		return Track{}, err
 	}
-	if tracks := appleTracks(results); len(tracks) > 0 {
+	if tracks := appleTracks(results, kind); len(tracks) > 0 {
 		return tracks[0], nil
 	}
 	return Track{}, ErrNotFound
@@ -113,21 +138,21 @@ func (a *Apple) Lookup(ctx context.Context, u *url.URL) (Track, error) {
 func (a *Apple) Search(ctx context.Context, want Track) (Track, error) {
 	results, err := a.itunes(ctx, "search", url.Values{
 		"term":    {want.Title + " " + want.Artist},
-		"entity":  {"song"},
+		"entity":  {itunesEntity(want.Kind)},
 		"limit":   {"10"},
 		"country": {a.country},
 	})
 	if err != nil {
 		return Track{}, err
 	}
-	if t, err := bestMatch(want, appleTracks(results)); err == nil {
+	if t, err := bestMatch(want, appleTracks(results, want.Kind)); err == nil {
 		return t, nil
 	}
 	return a.searchByArtist(ctx, want)
 }
 
 // searchByArtist covers new releases, which show up in lookups well before
-// they're added to the song search index.
+// they're added to the search index, and albums the search misses entirely.
 func (a *Apple) searchByArtist(ctx context.Context, want Track) (Track, error) {
 	artists, err := a.itunes(ctx, "search", url.Values{
 		"term":    {want.Artist},
@@ -138,9 +163,9 @@ func (a *Apple) searchByArtist(ctx context.Context, want Track) (Track, error) {
 	if err != nil || len(artists) == 0 {
 		return Track{}, ErrNotFound
 	}
-	songs, err := a.itunes(ctx, "lookup", url.Values{
+	found, err := a.itunes(ctx, "lookup", url.Values{
 		"id":      {strconv.Itoa(artists[0].ArtistID)},
-		"entity":  {"song"},
+		"entity":  {itunesEntity(want.Kind)},
 		"limit":   {"200"},
 		"sort":    {"recent"},
 		"country": {a.country},
@@ -148,16 +173,23 @@ func (a *Apple) searchByArtist(ctx context.Context, want Track) (Track, error) {
 	if err != nil {
 		return Track{}, err
 	}
-	return bestMatch(want, appleTracks(songs))
+	return bestMatch(want, appleTracks(found, want.Kind))
 }
 
-func appleTracks(results []itunesResult) []Track {
+// appleTracks keeps the songs, or the albums, from a mix of results.
+func appleTracks(results []itunesResult, kind Kind) []Track {
 	var tracks []Track
 	for _, r := range results {
-		if r.WrapperType != "track" {
+		var t Track
+		switch {
+		case kind == Song && r.WrapperType == "track":
+			t = r.track()
+		case kind == Album && r.WrapperType == "collection":
+			t = r.album()
+		default:
 			continue
 		}
-		if t := r.track(); t.URL != "" {
+		if t.URL != "" {
 			tracks = append(tracks, t)
 		}
 	}

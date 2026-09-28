@@ -1,6 +1,6 @@
 # bside
 
-Turn a song link into links for the other streaming apps. Supports Spotify, Apple Music, and YouTube Music.
+Turn a song or album link into links for the other streaming apps. Supports Spotify, Apple Music, and YouTube Music.
 
 <img src="assets/demo.gif" alt="bs turning an Apple Music link for Welcome Wagon by Fang Island into Spotify and YouTube Music links" width="800">
 

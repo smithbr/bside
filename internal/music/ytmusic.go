@@ -17,6 +17,9 @@ const (
 	ytAPI           = "https://music.youtube.com/youtubei/v1/"
 	ytClientVersion = "1.20260901.01.00"
 	ytSongsFilter   = "EgWKAQIIAWoKEAoQCRADEAQQBQ%3D%3D"
+	ytAlbumsFilter  = "EgWKAQIYAWoKEAoQCRADEAQQBQ%3D%3D"
+	ytAlbumPage     = "MUSIC_PAGE_TYPE_ALBUM"
+	ytArtistPage    = "MUSIC_PAGE_TYPE_ARTIST"
 )
 
 var ytDurationRe = regexp.MustCompile(`^(\d+:)?\d{1,2}:\d{2}$`)
@@ -48,8 +51,24 @@ func ytVideoID(u *url.URL) (string, error) {
 	return "", ErrUnsupported
 }
 
+// ytAlbumID handles album links: /browse/MPREb_<id>, and the album's own
+// playlist, /playlist?list=OLAK5uy_<id>. It returns whichever ID the link has.
+func ytAlbumID(u *url.URL) (browseID, playlistID string, ok bool) {
+	if id, found := strings.CutPrefix(u.Path, "/browse/"); found && strings.HasPrefix(id, "MPREb_") {
+		return id, "", true
+	}
+	if list := u.Query().Get("list"); u.Path == "/playlist" && strings.HasPrefix(list, "OLAK5uy_") {
+		return "", list, true
+	}
+	return "", "", false
+}
+
 func ytWatchURL(id string) string {
 	return "https://music.youtube.com/watch?v=" + url.QueryEscape(id)
+}
+
+func ytAlbumURL(browseID string) string {
+	return "https://music.youtube.com/browse/" + url.PathEscape(browseID)
 }
 
 func (y *YouTubeMusic) call(ctx context.Context, endpoint string, body map[string]any, v any) error {
@@ -70,6 +89,9 @@ func (y *YouTubeMusic) call(ctx context.Context, endpoint string, body map[strin
 }
 
 func (y *YouTubeMusic) Lookup(ctx context.Context, u *url.URL) (Track, error) {
+	if browseID, playlistID, ok := ytAlbumID(u); ok {
+		return y.lookupAlbum(ctx, browseID, playlistID)
+	}
 	id, err := ytVideoID(u)
 	if err != nil {
 		return Track{}, err
@@ -99,9 +121,37 @@ func (y *YouTubeMusic) Lookup(ctx context.Context, u *url.URL) (Track, error) {
 	}, nil
 }
 
+func (y *YouTubeMusic) lookupAlbum(ctx context.Context, browseID, playlistID string) (Track, error) {
+	if browseID == "" {
+		// The playlist page links each of its songs to the album page.
+		var raw json.RawMessage
+		if err := y.call(ctx, "browse", map[string]any{"browseId": "VL" + playlistID}, &raw); err != nil {
+			return Track{}, err
+		}
+		var err error
+		if browseID, err = firstYTAlbumLink(raw); err != nil {
+			return Track{}, err
+		}
+	}
+	var raw json.RawMessage
+	if err := y.call(ctx, "browse", map[string]any{"browseId": browseID}, &raw); err != nil {
+		return Track{}, err
+	}
+	t, err := parseYTAlbum(raw)
+	if err != nil {
+		return Track{}, err
+	}
+	t.URL = ytAlbumURL(browseID)
+	return t, nil
+}
+
 func (y *YouTubeMusic) Search(ctx context.Context, want Track) (Track, error) {
 	var raw json.RawMessage
-	body := map[string]any{"query": want.Title + " " + want.Artist, "params": ytSongsFilter}
+	filter := ytSongsFilter
+	if want.Kind == Album {
+		filter = ytAlbumsFilter
+	}
+	body := map[string]any{"query": want.Title + " " + want.Artist, "params": filter}
 	if err := y.call(ctx, "search", body, &raw); err != nil {
 		return Track{}, err
 	}
@@ -112,50 +162,69 @@ func (y *YouTubeMusic) Search(ctx context.Context, want Track) (Track, error) {
 	return bestMatch(want, candidates)
 }
 
+type ytNavigation struct {
+	BrowseEndpoint struct {
+		BrowseID string `json:"browseId"`
+		Configs  struct {
+			Music struct {
+				PageType string `json:"pageType"`
+			} `json:"browseEndpointContextMusicConfig"`
+		} `json:"browseEndpointContextSupportedConfigs"`
+	} `json:"browseEndpoint"`
+}
+
+func (n ytNavigation) pageType() string { return n.BrowseEndpoint.Configs.Music.PageType }
+
 type ytRun struct {
-	Text               string `json:"text"`
-	NavigationEndpoint struct {
-		BrowseEndpoint struct {
-			Configs struct {
-				Music struct {
-					PageType string `json:"pageType"`
-				} `json:"browseEndpointContextMusicConfig"`
-			} `json:"browseEndpointContextSupportedConfigs"`
-		} `json:"browseEndpoint"`
-	} `json:"navigationEndpoint"`
+	Text               string       `json:"text"`
+	NavigationEndpoint ytNavigation `json:"navigationEndpoint"`
+}
+
+type ytText struct {
+	Runs []ytRun `json:"runs"`
+}
+
+func (t ytText) first() string {
+	if len(t.Runs) == 0 {
+		return ""
+	}
+	return cleanText(t.Runs[0].Text)
 }
 
 type ytListItem struct {
 	FlexColumns []struct {
 		Renderer struct {
-			Text struct {
-				Runs []ytRun `json:"runs"`
-			} `json:"text"`
+			Text ytText `json:"text"`
 		} `json:"musicResponsiveListItemFlexColumnRenderer"`
 	} `json:"flexColumns"`
 	PlaylistItemData struct {
 		VideoID string `json:"videoId"`
 	} `json:"playlistItemData"`
+	NavigationEndpoint ytNavigation `json:"navigationEndpoint"`
 }
 
-// parseYTSearch pulls every musicResponsiveListItemRenderer out of the deeply
-// nested search response rather than depending on its exact shape.
-func parseYTSearch(raw json.RawMessage) ([]Track, error) {
+// ytFind pulls every value under key out of a deeply nested response rather
+// than depending on its exact shape, and decodes each into a T.
+func ytFind[T any](raw json.RawMessage, key string) ([]T, error) {
 	var root any
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return nil, err
 	}
-	var items []any
+	var found []T
 	var walk func(any)
 	walk = func(o any) {
 		switch v := o.(type) {
 		case map[string]any:
-			if item, ok := v["musicResponsiveListItemRenderer"]; ok {
-				items = append(items, item)
-				return
-			}
-			for _, child := range v {
-				walk(child)
+			for k, child := range v {
+				if k != key {
+					walk(child)
+					continue
+				}
+				b, _ := json.Marshal(child)
+				var t T
+				if json.Unmarshal(b, &t) == nil {
+					found = append(found, t)
+				}
 			}
 		case []any:
 			for _, child := range v {
@@ -164,23 +233,70 @@ func parseYTSearch(raw json.RawMessage) ([]Track, error) {
 		}
 	}
 	walk(root)
+	return found, nil
+}
 
+// firstYTAlbumLink finds the album page a playlist's songs link to.
+func firstYTAlbumLink(raw json.RawMessage) (string, error) {
+	navs, err := ytFind[ytNavigation](raw, "navigationEndpoint")
+	if err != nil {
+		return "", err
+	}
+	for _, n := range navs {
+		if n.pageType() == ytAlbumPage && n.BrowseEndpoint.BrowseID != "" {
+			return n.BrowseEndpoint.BrowseID, nil
+		}
+	}
+	return "", ErrNotFound
+}
+
+func parseYTAlbum(raw json.RawMessage) (Track, error) {
+	headers, err := ytFind[struct {
+		Title          ytText `json:"title"`
+		SecondSubtitle ytText `json:"secondSubtitle"`
+		Strapline      ytText `json:"straplineTextOne"`
+	}](raw, "musicResponsiveHeaderRenderer")
+	if err != nil {
+		return Track{}, err
+	}
+	if len(headers) == 0 || headers[0].Title.first() == "" {
+		return Track{}, ErrNotFound
+	}
+	h := headers[0]
+	t := Track{Kind: Album, Title: h.Title.first(), Artist: h.Strapline.first()}
+	// "12 songs"
+	if n, _, ok := strings.Cut(h.SecondSubtitle.first(), " "); ok {
+		t.TrackCount, _ = strconv.Atoi(n)
+	}
+	return t, nil
+}
+
+// parseYTSearch reads the songs and albums out of a search response.
+func parseYTSearch(raw json.RawMessage) ([]Track, error) {
+	items, err := ytFind[ytListItem](raw, "musicResponsiveListItemRenderer")
+	if err != nil {
+		return nil, err
+	}
 	var tracks []Track
-	for _, it := range items {
-		b, _ := json.Marshal(it)
-		var li ytListItem
-		if err := json.Unmarshal(b, &li); err != nil || li.PlaylistItemData.VideoID == "" || len(li.FlexColumns) < 2 {
+	for _, li := range items {
+		if len(li.FlexColumns) < 2 {
 			continue
 		}
-		t := Track{URL: ytWatchURL(li.PlaylistItemData.VideoID)}
-		if runs := li.FlexColumns[0].Renderer.Text.Runs; len(runs) > 0 {
-			t.Title = cleanText(runs[0].Text)
+		var t Track
+		switch browseID := li.NavigationEndpoint.BrowseEndpoint.BrowseID; {
+		case li.PlaylistItemData.VideoID != "":
+			t.URL = ytWatchURL(li.PlaylistItemData.VideoID)
+		case li.NavigationEndpoint.pageType() == ytAlbumPage && browseID != "":
+			t.Kind, t.URL = Album, ytAlbumURL(browseID)
+		default:
+			continue
 		}
+		t.Title = li.FlexColumns[0].Renderer.Text.first()
 		for _, r := range li.FlexColumns[1].Renderer.Text.Runs {
 			switch {
-			case r.NavigationEndpoint.BrowseEndpoint.Configs.Music.PageType == "MUSIC_PAGE_TYPE_ARTIST" && t.Artist == "":
+			case r.NavigationEndpoint.pageType() == ytArtistPage && t.Artist == "":
 				t.Artist = cleanText(r.Text)
-			case r.NavigationEndpoint.BrowseEndpoint.Configs.Music.PageType == "MUSIC_PAGE_TYPE_ALBUM":
+			case r.NavigationEndpoint.pageType() == ytAlbumPage:
 				t.Album = cleanText(r.Text)
 			case ytDurationRe.MatchString(r.Text):
 				t.Duration = parseClock(r.Text)

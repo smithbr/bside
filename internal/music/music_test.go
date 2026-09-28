@@ -55,29 +55,47 @@ func TestSource(t *testing.T) {
 	}
 }
 
-func TestTrackIDs(t *testing.T) {
-	if id, _ := spotifyTrackID(mustURL(t, "https://open.spotify.com/intl-de/track/abc123?si=x")); id != "abc123" {
-		t.Errorf("spotify id = %q", id)
+func TestLinkIDs(t *testing.T) {
+	if id, kind, _ := spotifyID(mustURL(t, "https://open.spotify.com/intl-de/track/abc123?si=x")); id != "abc123" || kind != Song {
+		t.Errorf("spotify track = %q, %v", id, kind)
 	}
-	if _, err := spotifyTrackID(mustURL(t, "https://open.spotify.com/album/abc123")); err != ErrUnsupported {
-		t.Errorf("spotify album err = %v", err)
+	if id, kind, _ := spotifyID(mustURL(t, "https://open.spotify.com/album/abc123")); id != "abc123" || kind != Album {
+		t.Errorf("spotify album = %q, %v", id, kind)
+	}
+	if _, _, err := spotifyID(mustURL(t, "https://open.spotify.com/playlist/abc123")); err != ErrUnsupported {
+		t.Errorf("spotify playlist err = %v", err)
 	}
 
-	id, country, _ := appleTrackID(mustURL(t, "https://music.apple.com/gb/album/x/1895056025?i=6762879197"))
-	if id != "6762879197" || country != "gb" {
-		t.Errorf("apple album link = %q, %q", id, country)
+	for link, want := range map[string]struct {
+		id, country string
+		kind        Kind
+	}{
+		"https://music.apple.com/gb/album/x/1895056025?i=6762879197": {"6762879197", "gb", Song},
+		"https://music.apple.com/us/song/bimbambau/6762879197":       {"6762879197", "us", Song},
+		"https://music.apple.com/us/album/viva-la-woman/207955592":   {"207955592", "us", Album},
+	} {
+		id, country, kind, err := appleID(mustURL(t, link))
+		if err != nil || id != want.id || country != want.country || kind != want.kind {
+			t.Errorf("appleID(%q) = %q, %q, %v, %v", link, id, country, kind, err)
+		}
 	}
-	if id, _, _ := appleTrackID(mustURL(t, "https://music.apple.com/us/song/bimbambau/6762879197")); id != "6762879197" {
-		t.Errorf("apple song link = %q", id)
-	}
-	if _, _, err := appleTrackID(mustURL(t, "https://music.apple.com/us/album/bimbambau/1895056025")); err != ErrUnsupported {
-		t.Errorf("apple album err = %v", err)
+	if _, _, _, err := appleID(mustURL(t, "https://music.apple.com/us/artist/cibo-matto/160032")); err != ErrUnsupported {
+		t.Errorf("apple artist err = %v", err)
 	}
 
 	for _, link := range []string{"https://youtu.be/9fTqkH54Jw8?si=x", "https://music.youtube.com/watch?v=9fTqkH54Jw8"} {
 		if id, _ := ytVideoID(mustURL(t, link)); id != "9fTqkH54Jw8" {
 			t.Errorf("yt id for %q = %q", link, id)
 		}
+	}
+	if b, _, ok := ytAlbumID(mustURL(t, "https://music.youtube.com/browse/MPREb_tQfaWH32ovE")); !ok || b != "MPREb_tQfaWH32ovE" {
+		t.Errorf("yt album browse id = %q, %v", b, ok)
+	}
+	if _, p, ok := ytAlbumID(mustURL(t, "https://music.youtube.com/playlist?list=OLAK5uy_lqcFZTOPHGwcnP0nYMzNuY0IES0fl7Fe4")); !ok || p != "OLAK5uy_lqcFZTOPHGwcnP0nYMzNuY0IES0fl7Fe4" {
+		t.Errorf("yt album playlist id = %q, %v", p, ok)
+	}
+	if _, _, ok := ytAlbumID(mustURL(t, "https://music.youtube.com/playlist?list=PLabc")); ok {
+		t.Error("a user playlist was taken for an album")
 	}
 }
 
@@ -97,9 +115,24 @@ func TestAppleTracksSkipsBadURLs(t *testing.T) {
 		{WrapperType: "track", TrackName: "Bad", TrackViewURL: "https://music.apple.com/us/song/x/1\x1b[2J"},
 		{WrapperType: "artist", ArtistName: "Someone"},
 		{WrapperType: "track", TrackName: "Good", TrackViewURL: "https://music.apple.com/us/song/x/2"},
-	})
+		{WrapperType: "collection", CollectionName: "Album", CollectionViewURL: "https://music.apple.com/us/album/x/3"},
+	}, Song)
 	if len(tracks) != 1 || tracks[0].Title != "Good" {
 		t.Errorf("appleTracks = %+v, want only Good", tracks)
+	}
+}
+
+func TestAppleAlbums(t *testing.T) {
+	albums := appleTracks([]itunesResult{
+		{WrapperType: "artist", ArtistName: "Cibo Matto"},
+		{WrapperType: "track", TrackName: "Know Your Chicken", TrackViewURL: "https://music.apple.com/us/album/x/207955592?i=1"},
+		{WrapperType: "collection", CollectionName: "Viva! La Woman", ArtistName: "Cibo Matto", TrackCount: 11,
+			CollectionViewURL: "https://music.apple.com/us/album/viva-la-woman/207955592?uo=4"},
+	}, Album)
+	want := Track{Kind: Album, Title: "Viva! La Woman", Artist: "Cibo Matto", TrackCount: 11,
+		URL: "https://music.apple.com/us/album/viva-la-woman/207955592"}
+	if len(albums) != 1 || albums[0] != want {
+		t.Errorf("appleTracks = %+v, want %+v", albums, want)
 	}
 }
 
@@ -130,6 +163,16 @@ func TestBestMatch(t *testing.T) {
 	got, _ = bestMatch(isrc, []Track{{Title: "x", URL: "a"}, {Title: "different", ISRC: "gbarl9300135", URL: "b"}})
 	if got.URL != "b" {
 		t.Errorf("ISRC match = %q", got.URL)
+	}
+
+	album := Track{Kind: Album, Title: "Abbey Road (Remastered)", Artist: "The Beatles", TrackCount: 17}
+	got, _ = bestMatch(album, []Track{
+		{Title: "Abbey Road", Artist: "The Beatles", URL: "song"},
+		{Kind: Album, Title: "Abbey Road (Super Deluxe Edition)", Artist: "The Beatles", TrackCount: 40, URL: "deluxe"},
+		{Kind: Album, Title: "Abbey Road", Artist: "The Beatles", TrackCount: 17, URL: "standard"},
+	})
+	if got.URL != "standard" {
+		t.Errorf("album match = %q", got.URL)
 	}
 }
 
@@ -186,6 +229,41 @@ func TestParseYTSearch(t *testing.T) {
 	}
 	if tracks[0] != want {
 		t.Errorf("got %+v, want %+v", tracks[0], want)
+	}
+
+	raw = []byte(`{"contents":[{"musicResponsiveListItemRenderer":{
+		"navigationEndpoint":{"browseEndpoint":{"browseId":"MPREb_tQfaWH32ovE","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_ALBUM"}}}},
+		"flexColumns":[
+			{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Abbey Road"}]}}},
+			{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[
+				{"text":"Album"},
+				{"text":" • "},
+				{"text":"The Beatles","navigationEndpoint":{"browseEndpoint":{"browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}},
+				{"text":" • "},
+				{"text":"1969"}]}}}]}}]}`)
+	tracks, err = parseYTSearch(raw)
+	wantAlbum := Track{Kind: Album, Title: "Abbey Road", Artist: "The Beatles", URL: "https://music.youtube.com/browse/MPREb_tQfaWH32ovE"}
+	if err != nil || len(tracks) != 1 || tracks[0] != wantAlbum {
+		t.Errorf("parseYTSearch album = %+v, %v", tracks, err)
+	}
+}
+
+func TestParseYTAlbum(t *testing.T) {
+	raw := []byte(`{"contents":{"x":[{"musicResponsiveHeaderRenderer":{
+		"title":{"runs":[{"text":"Abbey Road"}]},
+		"secondSubtitle":{"runs":[{"text":"17 songs"},{"text":" • "},{"text":"47 minutes"}]},
+		"straplineTextOne":{"runs":[{"text":"The Beatles"}]}}}]}}`)
+	got, err := parseYTAlbum(raw)
+	want := Track{Kind: Album, Title: "Abbey Road", Artist: "The Beatles", TrackCount: 17}
+	if err != nil || got != want {
+		t.Errorf("parseYTAlbum = %+v, %v", got, err)
+	}
+
+	playlist := []byte(`{"contents":[{"musicResponsiveListItemRenderer":{"flexColumns":[{"text":{"runs":[
+		{"text":"The Beatles","navigationEndpoint":{"browseEndpoint":{"browseId":"UC1","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}},
+		{"text":"Abbey Road","navigationEndpoint":{"browseEndpoint":{"browseId":"MPREb_x","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_ALBUM"}}}}}]}}]}}]}`)
+	if id, err := firstYTAlbumLink(playlist); err != nil || id != "MPREb_x" {
+		t.Errorf("firstYTAlbumLink = %q, %v", id, err)
 	}
 }
 

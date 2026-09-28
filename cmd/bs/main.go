@@ -21,9 +21,9 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `Usage: bs [flags] [link]
        bs setup
 
-Turns a song link from one streaming platform into links for the others.
-Supported: Spotify, Apple Music, YouTube Music. With no link, bs asks you
-to paste one.
+Turns a song or album link from one streaming platform into links for the
+others. Supported: Spotify, Apple Music, YouTube Music. With no link, bs
+asks you to paste one.
 
 Flags:
   -to <platform>  print only this platform's link (spotify, apple, youtube)

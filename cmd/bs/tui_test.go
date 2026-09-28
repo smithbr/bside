@@ -173,3 +173,11 @@ func TestOpenURLRejectsNonHTTPS(t *testing.T) {
 		}
 	}
 }
+
+func TestAlbumDetails(t *testing.T) {
+	for n, want := range map[int]string{0: "Album", 1: "Album · 1 song", 11: "Album · 11 songs"} {
+		if got := albumDetails(music.Track{Kind: music.Album, TrackCount: n}); got != want {
+			t.Errorf("albumDetails(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

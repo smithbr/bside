@@ -66,23 +66,39 @@ func (s *Spotify) Owns(u *url.URL) bool {
 	return u.Hostname() == "open.spotify.com"
 }
 
-func spotifyTrackID(u *url.URL) (string, error) {
+// spotifyPath is the link's path segment for each kind, as in /track/<id>.
+var spotifyPath = map[Kind]string{Song: "track", Album: "album"}
+
+func spotifyID(u *url.URL) (string, Kind, error) {
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	for i, p := range parts {
-		if p == "track" && i+1 < len(parts) {
-			return parts[i+1], nil
+		for kind, name := range spotifyPath {
+			if p == name && i+1 < len(parts) {
+				return parts[i+1], kind, nil
+			}
 		}
 	}
-	return "", ErrUnsupported
+	return "", Song, ErrUnsupported
+}
+
+func spotifyURL(kind Kind, id string) string {
+	return "https://open.spotify.com/" + spotifyPath[kind] + "/" + url.PathEscape(id)
 }
 
 func (s *Spotify) Lookup(ctx context.Context, u *url.URL) (Track, error) {
-	id, err := spotifyTrackID(u)
+	id, kind, err := spotifyID(u)
 	if err != nil {
 		return Track{}, err
 	}
 	if s.clientID == "" || s.clientSecret == "" {
-		return s.lookupEmbed(ctx, id)
+		return s.lookupEmbed(ctx, kind, id)
+	}
+	if kind == Album {
+		var a spotifyAlbum
+		if err := s.api(ctx, "/v1/albums/"+url.PathEscape(id), nil, &a); err != nil {
+			return Track{}, err
+		}
+		return a.album(), nil
 	}
 	var t spotifyTrack
 	if err := s.api(ctx, "/v1/tracks/"+url.PathEscape(id), nil, &t); err != nil {
@@ -92,8 +108,8 @@ func (s *Spotify) Lookup(ctx context.Context, u *url.URL) (Track, error) {
 }
 
 // lookupEmbed reads the public embed page, which needs no credentials.
-func (s *Spotify) lookupEmbed(ctx context.Context, id string) (Track, error) {
-	req, err := newRequest(ctx, http.MethodGet, "https://open.spotify.com/embed/track/"+url.PathEscape(id), nil)
+func (s *Spotify) lookupEmbed(ctx context.Context, kind Kind, id string) (Track, error) {
+	req, err := newRequest(ctx, http.MethodGet, "https://open.spotify.com/embed/"+spotifyPath[kind]+"/"+url.PathEscape(id), nil)
 	if err != nil {
 		return Track{}, err
 	}
@@ -112,10 +128,12 @@ func (s *Spotify) lookupEmbed(ctx context.Context, id string) (Track, error) {
 					Data struct {
 						Entity struct {
 							Name     string `json:"name"`
+							Subtitle string `json:"subtitle"`
 							Duration int    `json:"duration"`
 							Artists  []struct {
 								Name string `json:"name"`
 							} `json:"artists"`
+							TrackList []struct{} `json:"trackList"`
 						} `json:"entity"`
 					} `json:"data"`
 				} `json:"state"`
@@ -130,11 +148,17 @@ func (s *Spotify) lookupEmbed(ctx context.Context, id string) (Track, error) {
 		return Track{}, ErrNotFound
 	}
 	t := Track{
+		Kind:     kind,
 		Title:    cleanText(e.Name),
 		Duration: time.Duration(e.Duration) * time.Millisecond,
-		URL:      "https://open.spotify.com/track/" + url.PathEscape(id),
+		URL:      spotifyURL(kind, id),
 	}
-	if len(e.Artists) > 0 {
+	switch {
+	case kind == Album:
+		// An album's embed has no artist list, only the artists as its subtitle.
+		t.Artist = cleanText(e.Subtitle)
+		t.TrackCount = len(e.TrackList)
+	case len(e.Artists) > 0:
 		t.Artist = cleanText(e.Artists[0].Name)
 	}
 	return t, nil
@@ -143,6 +167,9 @@ func (s *Spotify) lookupEmbed(ctx context.Context, id string) (Track, error) {
 func (s *Spotify) Search(ctx context.Context, want Track) (Track, error) {
 	if s.clientID == "" || s.clientSecret == "" {
 		return Track{}, ErrSpotifyCredentials
+	}
+	if want.Kind == Album {
+		return s.searchAlbum(ctx, want)
 	}
 	queries := []string{fmt.Sprintf("track:%s artist:%s", want.Title, want.Artist)}
 	if want.ISRC != "" {
@@ -169,6 +196,23 @@ func (s *Spotify) Search(ctx context.Context, want Track) (Track, error) {
 	return Track{}, ErrNotFound
 }
 
+func (s *Spotify) searchAlbum(ctx context.Context, want Track) (Track, error) {
+	var res struct {
+		Albums struct {
+			Items []spotifyAlbum `json:"items"`
+		} `json:"albums"`
+	}
+	params := url.Values{"q": {fmt.Sprintf("album:%s artist:%s", want.Title, want.Artist)}, "type": {"album"}, "limit": {"10"}}
+	if err := s.api(ctx, "/v1/search", params, &res); err != nil {
+		return Track{}, err
+	}
+	candidates := make([]Track, len(res.Albums.Items))
+	for i, it := range res.Albums.Items {
+		candidates[i] = it.album()
+	}
+	return bestMatch(want, candidates)
+}
+
 type spotifyTrack struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
@@ -190,10 +234,32 @@ func (st spotifyTrack) track() Track {
 		Album:    cleanText(st.Album.Name),
 		Duration: time.Duration(st.DurationMS) * time.Millisecond,
 		ISRC:     st.ExternalIDs.ISRC,
-		URL:      "https://open.spotify.com/track/" + url.PathEscape(st.ID),
+		URL:      spotifyURL(Song, st.ID),
 	}
 	if len(st.Artists) > 0 {
 		t.Artist = cleanText(st.Artists[0].Name)
+	}
+	return t
+}
+
+type spotifyAlbum struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	TotalTracks int    `json:"total_tracks"`
+	Artists     []struct {
+		Name string `json:"name"`
+	} `json:"artists"`
+}
+
+func (sa spotifyAlbum) album() Track {
+	t := Track{
+		Kind:       Album,
+		Title:      cleanText(sa.Name),
+		TrackCount: sa.TotalTracks,
+		URL:        spotifyURL(Album, sa.ID),
+	}
+	if len(sa.Artists) > 0 {
+		t.Artist = cleanText(sa.Artists[0].Name)
 	}
 	return t
 }

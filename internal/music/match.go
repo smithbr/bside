@@ -74,6 +74,10 @@ func score(want, got Track) float64 {
 			s -= 0.15
 		}
 	}
+	// Tells a standard album from its deluxe edition, whose names normalize the same.
+	if want.TrackCount > 0 && want.TrackCount == got.TrackCount {
+		s += 0.05
+	}
 	return s
 }
 
@@ -81,6 +85,9 @@ func bestMatch(want Track, candidates []Track) (Track, error) {
 	var best Track
 	bestScore := 0.0
 	for _, c := range candidates {
+		if c.Kind != want.Kind {
+			continue
+		}
 		if s := score(want, c); s > bestScore {
 			best, bestScore = c, s
 		}
