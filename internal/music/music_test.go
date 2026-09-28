@@ -242,6 +242,9 @@ func TestConfigDirXDG(t *testing.T) {
 // Earlier versions saved unnested credentials in spotify.json; the first run
 // converts them into bside.json and removes the old file.
 func TestConfigMigrate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows keeps its own config directory")
+	}
 	for _, legacy := range []string{"config", "user config"} {
 		t.Run(legacy, func(t *testing.T) {
 			home := t.TempDir()
