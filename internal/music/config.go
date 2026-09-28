@@ -76,7 +76,7 @@ func loadConfig() config {
 		return migrateConfig(path)
 	}
 	if err == nil {
-		json.Unmarshal(b, &c)
+		_ = json.Unmarshal(b, &c) // a malformed file is an empty config
 		restrictPerms(path)
 	}
 	return c

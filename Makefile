@@ -12,3 +12,14 @@ install:
 .PHONY: demo
 demo: install
 	vhs assets/demo.tape
+
+.PHONY: test
+test:
+	go test -race ./...
+
+# Needs golangci-lint (brew install golangci-lint).
+.PHONY: lint
+lint:
+	test -z "$$(gofmt -l .)" || { gofmt -l .; exit 1; }
+	go vet ./...
+	golangci-lint run ./...

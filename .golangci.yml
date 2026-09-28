@@ -1,0 +1,17 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      # Best-effort calls whose failure bs deliberately ignores.
+      exclude-functions:
+        - fmt.Fprintf
+        - (*text/tabwriter.Writer).Flush
+        - golang.org/x/term.Restore
+        - os.Chmod
+        - os.Remove
+        - (io.Closer).Close
+        - (net/http.ResponseWriter).Write
+    staticcheck:
+      # The defaults, minus quickfix suggestions that don't read better here.
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022", "-QF1001", "-QF1002"]
