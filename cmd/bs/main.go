@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"text/tabwriter"
 
@@ -27,10 +28,25 @@ to paste one.
 Flags:
   -to <platform>  print only this platform's link (spotify, apple, youtube)
   -all            print every link found without the interactive list
+  -version        print the version and exit
 
 Searching Spotify needs a Spotify developer app (Premium only): run "bs setup" once,
 or set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.
 `)
+}
+
+// version is set by release builds. Otherwise it comes from the module
+// version, which go install records, or is "dev" for local builds.
+var version = ""
+
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return "dev"
 }
 
 func main() {
@@ -53,6 +69,7 @@ func run(ctx context.Context, args []string) error {
 	fs.Usage = usage
 	to := fs.String("to", "", "")
 	all := fs.Bool("all", false, "")
+	showVersion := fs.Bool("version", false, "")
 
 	// Allow flags before or after the link.
 	var positional []string
@@ -68,6 +85,10 @@ func run(ctx context.Context, args []string) error {
 		}
 		positional = append(positional, fs.Arg(0))
 		args = fs.Args()[1:]
+	}
+	if *showVersion {
+		fmt.Println("bs", buildVersion())
+		return nil
 	}
 	if len(positional) > 1 {
 		usage()
