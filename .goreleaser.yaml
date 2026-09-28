@@ -57,7 +57,7 @@ homebrew_casks:
     repository:
       owner: smithbr
       name: homebrew-tap
-      token: '{{ envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "" }}'
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "") "" }}true{{ end }}'
     hooks:
       post:
