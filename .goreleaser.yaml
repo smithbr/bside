@@ -46,8 +46,7 @@ changelog:
       order: 999
 
 # Publishes a cask to github.com/smithbr/homebrew-tap, so people can
-# brew install smithbr/tap/bs. Skipped until the HOMEBREW_TAP_GITHUB_TOKEN
-# secret exists, since the default token can't push to another repo.
+# brew install smithbr/tap/bs.
 homebrew_casks:
   - name: bs
     binaries: [bs]
@@ -59,10 +58,16 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "") "" }}true{{ end }}'
-    hooks:
-      post:
-        # The binaries aren't notarized, so clear Gatekeeper's quarantine flag.
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/bs"]
-          end
+    # The binaries aren't notarized, so clear Gatekeeper's quarantine flag.
+    # postflight_steps replaces the deprecated postflight block that
+    # GoReleaser's hooks would generate.
+    custom_block: |
+      postflight_steps do
+        on_macos do
+          run "/usr/bin/xattr",
+              args:           ["-d", "com.apple.quarantine", "bs"],
+              chdir:          ".",
+              writable_paths: ["bs"],
+              must_succeed:   false
+        end
+      end
