@@ -7,6 +7,12 @@ Turn a song link into links for the other streaming apps. Supports Spotify, Appl
 ## Install
 
 ```bash
+brew install smithbr/tap/bs
+```
+
+Or with Go:
+
+```bash
 go install github.com/smithbr/bside/cmd/bs@latest
 ```
 
