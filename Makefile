@@ -8,6 +8,10 @@ BIN_DIR ?= $(or $(XDG_BIN_HOME),$(HOME)/.local/bin)
 install:
 	go build -o $(BIN_DIR)/bs ./cmd/bs
 
+.PHONY: uninstall
+uninstall:
+	rm -f $(BIN_DIR)/bs
+
 # Re-records the README GIF. Needs VHS (brew install vhs).
 .PHONY: demo
 demo: install
