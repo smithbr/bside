@@ -74,16 +74,3 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_GITHUB_TOKEN" "") "" }}true{{ end }}'
-    # The binaries aren't notarized, so clear Gatekeeper's quarantine flag.
-    # postflight_steps replaces the deprecated postflight block that
-    # GoReleaser's hooks would generate.
-    custom_block: |
-      postflight_steps do
-        on_macos do
-          run "/usr/bin/xattr",
-              args:           ["-d", "com.apple.quarantine", "bs"],
-              chdir:          ".",
-              writable_paths: ["bs"],
-              must_succeed:   false
-        end
-      end
