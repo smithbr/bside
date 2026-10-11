@@ -17,6 +17,22 @@ builds:
     ldflags:
       - -s -w -X main.version={{.Version}}
 
+# Signs the macOS binaries with the Developer ID certificate and notarizes
+# them with Apple. GoReleaser does this itself, so it runs on Linux too.
+# Skipped when the signing secrets aren't set, as in `make snapshot`.
+notarize:
+  macos:
+    - enabled: '{{ ne (envOrDefault "MACOS_SIGN_P12" "") "" }}'
+      sign:
+        certificate: "{{.Env.MACOS_SIGN_P12}}"
+        password: "{{.Env.MACOS_SIGN_PASSWORD}}"
+      notarize:
+        issuer_id: "{{.Env.MACOS_NOTARY_ISSUER_ID}}"
+        key_id: "{{.Env.MACOS_NOTARY_KEY_ID}}"
+        key: "{{.Env.MACOS_NOTARY_KEY}}"
+        wait: true
+        timeout: 20m
+
 archives:
   - formats: [tar.gz]
     format_overrides:
