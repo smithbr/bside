@@ -11,6 +11,24 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
+      # GoReleaser skips signing when these are empty, and Gatekeeper blocks
+      # unsigned binaries now that the cask no longer clears quarantine.
+      - name: Check macOS signing secrets
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          missing=()
+          for name in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_ISSUER_ID MACOS_NOTARY_KEY_ID MACOS_NOTARY_KEY; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing signing secrets: ${missing[*]}. Releases must be signed and notarized."
+            exit 1
+          fi
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0 # the changelog needs the full history
